@@ -8,7 +8,9 @@ from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
 from datetime import datetime, timezone
 
-FLAMENCO_API_URL = "http://192.168.86.31:9080/api/v3"
+FLAMENCO_SERVER = os.environ.get("FLAMENCO_SERVER", "localhost:9080")
+FLAMENCO_API_URL = f"http://{FLAMENCO_SERVER}/api/v3"
+FLAMENCO_JOBFILES_URL_ROOT = f"http://{FLAMENCO_SERVER}/job-files"
 
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
@@ -54,7 +56,7 @@ def get_tasks(job_id):
 
 def get_log_url(job_id, task_id):
     job_prefix = job_id[:4]
-    return f"http://192.168.86.31:9080/job-files/job-{job_prefix}/{job_id}/task-{task_id}.txt"
+    return f"{FLAMENCO_JOBFILES_URL_ROOT}/job-{job_prefix}/{job_id}/task-{task_id}.txt"
 
 def parse_time_remaining(line):
     m = re.search(r"Remaining:((?:\d{1,2}:)?\d{1,2}:\d{2}(?:\.\d{1,2})?)", line)
@@ -112,16 +114,12 @@ def extract_render_step_and_tile(lines):
         (r"\|\s*Scene, View Layer \|\s*Finished$", "Finished"),
     ]
     for line in reversed(lines):
-        # 1. Check for tile rendering lines
         m = re.search(r"Rendered\s+(\d+)\s*/\s*(\d+)\s+Tiles", line)
         if m:
             tile_info = f"Rendering tile {m.group(1)} of {m.group(2)}"
-            # There may be a sample after this, keep parsing for that
-        # 2. Check for step
         for pat, label in step_patterns:
             if re.search(pat, line):
                 step_label = label
-        # Stop early if both found
         if tile_info and step_label:
             break
     return step_label, tile_info
@@ -141,7 +139,6 @@ def fetch_render_progress_and_step(log_url):
             if m:
                 cur, total = int(m.group(1)), int(m.group(2))
                 pct = int(cur / total * 100) if total else 0
-                # Look for time remaining in same or recent lines
                 for lookback in range(0, 10):
                     idx = lines.index(line) - lookback
                     if idx < 0:
@@ -151,12 +148,10 @@ def fetch_render_progress_and_step(log_url):
                         time_remaining = tr
                         break
                 return cur, total, pct, f"{cur} / {total}", last_update, step_label, tile_info, time_remaining
-            # Also check for progress % in building BVH, rendering, etc
             m2 = re.search(r"Building BVH\s+(\d+)%", line)
             if m2:
                 pct = int(m2.group(1))
                 return pct, 100, pct, f"{pct}%", last_update, "Building BVH", "", ""
-        # Also check for time remaining even if not rendering tiles yet
         for line in reversed(lines):
             tr = parse_time_remaining(line)
             if tr:
@@ -254,7 +249,6 @@ def collect_job_data():
             "completed_time": dt_local.strftime("%Y-%m-%d %H:%M:%S") if dt_local else "N/A",
             "job_status": job.get("status", "-").capitalize(),
         }
-        # Add task info for this job:
         task_objs = get_tasks(job_id)
         task_display = []
         for t in task_objs:
