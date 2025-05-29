@@ -308,6 +308,7 @@ TEMPLATE = """
 <head>
     <title>Flamenco Live Monitor</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <style>
         body {
             background: #222;
