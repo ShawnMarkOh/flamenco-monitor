@@ -35,5 +35,5 @@ jobs:
         platforms: linux/amd64
         push: true
         tags: |
-          ghcr.io/${{ toLower(github.repository_owner) }}/flamenco-monitor:latest
-          ghcr.io/${{ toLower(github.repository_owner) }}/flamenco-monitor:${{ github.sha }}
+            ghcr.io/shawnmarkoh/flamenco-monitor:latest
+            ghcr.io/shawnmarkoh/flamenco-monitor:${{ github.sha }}
