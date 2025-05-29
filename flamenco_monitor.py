@@ -38,6 +38,16 @@ def get_farm_status():
         print(f"Error querying farm status: {e}")
         return 'unavailable'
 
+def get_workers():
+    try:
+        resp = requests.get(f"{FLAMENCO_API_URL}/worker-mgt/workers", timeout=3)
+        resp.raise_for_status()
+        workers = resp.json().get('workers', [])
+        return workers
+    except Exception as e:
+        print(f"Error querying workers: {e}")
+        return []
+
 def get_jobs(statuses=["active", "queued"]):
     try:
         response = requests.post(
@@ -295,7 +305,7 @@ def collect_job_data():
         completed_job['tasks'] = task_display
         completed_jobs_display.append(completed_job)
 
-    return {"jobs": jobs_display, "completed_jobs": completed_jobs_display}
+    return {"jobs": jobs_display, "completed_jobs": completed_jobs_display, "workers": get_workers()}
 
 @app.route("/")
 def index():
@@ -329,6 +339,121 @@ TEMPLATE = """
             font-family: Segoe UI, Arial, sans-serif;
             margin: 0; padding: 0;
         }
+        .main-flex {
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            min-height: 100vh;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        .workers-sidebar,
+        .completed-sidebar {
+            width: 340px;
+            background: #222329;
+            border-radius: 0 12px 12px 0;
+            box-sizing: border-box;
+            box-shadow: 2px 0 16px #0004;
+            position: fixed;
+            top: 0;
+            height: 100vh;
+            z-index: 10;
+            overflow-y: auto;
+            padding: 22px 12px 30px 18px;
+            border-right: 1.5px solid #363646;
+        }
+        .workers-sidebar {
+            left: 0;
+            border-radius: 0 12px 12px 0;
+            border-right: 1.5px solid #363646;
+        }
+        .completed-sidebar {
+            right: 0;
+            border-radius: 12px 0 0 12px;
+            border-left: 1.5px solid #363646;
+            border-right: none;
+            padding: 22px 18px 30px 12px;
+            box-shadow: -2px 0 16px #0004;
+        }
+        .workers-title, .completed-title {
+            font-size: 1.20em;
+            margin-bottom: 15px;
+            color: #a7ebfa;
+            letter-spacing: 0.07em;
+            font-weight: 500;
+            text-align: left;
+        }
+        .worker-entry {
+            background: #29293a;
+            border-radius: 7px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 7px #0002;
+            transition: background 0.18s;
+        }
+        .worker-header {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 13px 10px 13px 10px;
+            border-radius: 7px;
+            transition: background 0.15s;
+        }
+        .worker-header:hover {
+            background: #2e3950;
+        }
+        .worker-name {
+            font-weight: 600;
+            font-size: 1.08em;
+            margin-right: 18px;
+        }
+        .worker-status {
+            font-size: 1em;
+            font-family: monospace;
+            margin-right: 16px;
+            padding: 1px 9px 1px 8px;
+            border-radius: 8px;
+            background: #1b212b;
+            color: #80ffd2;
+            font-weight: 500;
+        }
+        .worker-status.awake { color: #73ff7a; background: #223d1e; }
+        .worker-status.offline { color: #ff7878; background: #341d1d; }
+        .worker-status.idle { color: #fff49a; background: #32320f; }
+        .worker-status.busy { color: #7ad1ff; background: #182340; }
+        .worker-version {
+            font-size: 0.97em;
+            color: #8ef2f3;
+        }
+        .worker-toggle-arrow {
+            font-size: 1.45em;
+            color: #79e6fa;
+            margin-right: 10px;
+        }
+        .worker-details {
+            background: #1c1c25;
+            border-radius: 0 0 7px 7px;
+            padding: 13px 15px 10px 31px;
+            margin-bottom: 2px;
+            font-size: 0.99em;
+            color: #eee;
+            box-shadow: 0 2px 7px #0001;
+        }
+        .worker-details-row {
+            margin-bottom: 5px;
+            font-family: monospace;
+        }
+        .container {
+            flex: 1;
+            max-width: 1100px;
+            margin: 40px auto;
+            background: #292929;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px #000a;
+            padding: 32px;
+            margin-left: 360px; /* space for left sidebar */
+            margin-right: 360px; /* space for right sidebar */
+            min-height: 100vh;
+        }
         .status-bar {
             width: 410px;
             margin: 26px auto 0 auto;
@@ -344,14 +469,6 @@ TEMPLATE = """
         .status-yellow { color: #ffdb37; font-weight: bold; }
         .status-green { color: #7bf178; font-weight: bold; }
         .status-orange { color: #ff9800; font-weight: bold; }
-        .container {
-            max-width: 1100px;
-            margin: 40px auto;
-            background: #292929;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px #000a;
-            padding: 32px;
-        }
         h2 { margin-bottom: 24px; }
         .job-block {
             margin-bottom: 38px;
@@ -414,40 +531,158 @@ TEMPLATE = """
         }
         .task-table tr:last-child td { border-bottom: none; }
         .log-link { color: #53e7fc; text-decoration: underline; }
-        .completed-job-header {
-            background: #1b1e2b;
-            border-radius: 7px 7px 0 0;
-            padding: 10px 14px;
-            margin-bottom: 0;
-            font-size: 1.13em;
+        .completed-job-list-item {
+            background: #27283a;
+            border-radius: 8px;
+            padding: 13px 9px 13px 13px;
+            margin-bottom: 11px;
             cursor: pointer;
+            transition: background 0.15s;
+            box-shadow: 0 1px 7px #0002;
             display: flex;
-            align-items: center;
+            flex-direction: column;
         }
-        .completed-job-header .toggle-arrow {
-            font-size: 1.4em;
-            margin-right: 12px;
-            color: #5ad9fa;
+        .completed-job-list-item:hover {
+            background: #25315a;
         }
-        .completed-job-content {
-            background: #222;
-            padding: 6px 12px 20px 12px;
-            border-radius: 0 0 7px 7px;
+        .completed-title {
+            margin-bottom: 13px;
+        }
+        .completed-job-list-name {
+            font-size: 1.09em;
+            font-weight: 600;
+        }
+        .completed-job-list-id {
+            font-size: 0.97em;
+            color: #98e6ff;
+            margin-left: 5px;
+        }
+        .completed-job-list-status {
+            font-size: 0.99em;
+            color: #ffd96d;
+            margin-left: 7px;
+        }
+        .completed-job-list-time {
+            font-size: 0.98em;
+            color: #aeffae;
+            margin-left: 5px;
         }
         .completed-task-table th {
             background: #243248;
             color: #6bc9f3;
         }
+
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            z-index: 10001;
+            left: 0;
+            top: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(20, 20, 40, 0.88);
+        }
+        .modal-overlay.active {
+            display: block;
+        }
+        .modal-dialog {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 420px;
+            min-height: 200px;
+            background: #242637;
+            border-radius: 15px;
+            box-shadow: 0 9px 48px #000c;
+            padding: 35px 35px 30px 35px;
+            max-width: 850px;
+            width: 90vw;
+            max-height: 88vh;
+            overflow-y: auto;
+            color: #fff;
+        }
+        .modal-close {
+            position: absolute;
+            top: 15px;
+            right: 23px;
+            font-size: 2.1em;
+            font-weight: 800;
+            color: #b4f4fa;
+            cursor: pointer;
+            z-index: 9999;
+            transition: color 0.18s;
+        }
+        .modal-close:hover { color: #ff7b7b; }
+        .modal-job-header {
+            font-size: 1.25em;
+            font-weight: bold;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .modal-job-id {
+            font-size: 0.98em;
+            color: #99f1f6;
+        }
+        .modal-job-status {
+            font-size: 0.98em;
+            color: #ffd96d;
+        }
+        .modal-job-time {
+            font-size: 0.97em;
+            color: #aeffae;
+        }
+        .modal-tasks-label {
+            margin-top: 16px;
+            font-size: 1.08em;
+            font-weight: 600;
+            color: #9be0fd;
+            margin-bottom: 5px;
+        }
+        @media (max-width:1200px) {
+            .main-flex { flex-direction: column; }
+            .workers-sidebar, .completed-sidebar {
+                position: static;
+                width: 99%;
+                border-radius: 0 0 12px 12px;
+                height: auto;
+                min-height: 0;
+                margin-bottom: 10px;
+            }
+            .container { margin-left: 0; margin-right: 0; }
+            .modal-dialog { min-width: 98vw; padding: 15px; }
+        }
+        @media (max-width: 500px) {
+            .modal-dialog { min-width: 98vw; font-size: 0.96em; }
+        }
     </style>
 </head>
 <body>
     <div id="farm-status" class="status-bar"></div>
-    <div class="container">
-        <h2>Flamenco Jobs & Task Progress <span id="updating" style="font-size:0.7em; color:#6f8;">(Live)</span></h2>
-        <div id="jobs-list"></div>
-        <hr style="margin:48px 0 32px 0; border:1px solid #333;">
-        <h2>Last 10 Completed Jobs</h2>
-        <div id="completed-jobs-list"></div>
+    <div class="main-flex">
+        <div class="workers-sidebar">
+            <div class="workers-title">Flamenco Workers</div>
+            <div id="workers-list"></div>
+        </div>
+        <div class="container">
+            <h2>Flamenco Jobs & Task Progress <span id="updating" style="font-size:0.7em; color:#6f8;">(Live)</span></h2>
+            <div id="jobs-list"></div>
+        </div>
+        <div class="completed-sidebar">
+            <div class="completed-title">Last 10 Completed Jobs</div>
+            <div id="completed-jobs-list"></div>
+        </div>
+    </div>
+
+    <!-- Modal for completed job details -->
+    <div class="modal-overlay" id="completed-job-modal-overlay" onclick="closeCompletedJobModal(event)">
+        <div class="modal-dialog" id="completed-job-modal-dialog" onclick="event.stopPropagation()">
+            <div class="modal-close" onclick="closeCompletedJobModal(event)">&times;</div>
+            <div id="completed-job-modal-content"></div>
+        </div>
     </div>
     <script>
         function updateFarmStatusBox(farmStatus) {
@@ -468,12 +703,13 @@ TEMPLATE = """
             document.getElementById("farm-status").innerHTML =
               `Farm Status: <span class="${colorClass}">${label}</span>`;
         }
-        // Initial status from server
         updateFarmStatusBox("{{ farm_status }}");
 
         var taskSortingState = {};
         var completedDropdownState = {};
         var lastJobsData = [];
+        var workersDropdownState = {};
+        var lastCompletedJobs = [];
 
         function createProgressBar(pct, width=200, height=16) {
             return `<div class="progress-bar-bg" style="width:${width}px;height:${height}px;">
@@ -575,77 +811,129 @@ TEMPLATE = """
             });
             document.getElementById("jobs-list").innerHTML = html;
         }
+
+        // Modal popup for completed jobs
         function renderCompletedJobs(jobs) {
+            lastCompletedJobs = jobs;
             let html = '';
             jobs.forEach(function(job, idx) {
-                let dropdownId = "completed-job-dropdown-" + idx;
-                let isOpen = completedDropdownState[dropdownId] || false;
                 html += `
-                    <div style="margin-bottom:18px;">
-                        <div class="completed-job-header" onclick="toggleCompletedDropdown('${dropdownId}')">
-                            <span class="toggle-arrow" id="arrow-${dropdownId}">${isOpen ? '−' : '+'}</span>
-                            <span style="flex:1;"><b>${job.job_name}</b> <small style="color:#888;">[${job.job_id}]</small> &nbsp; <span style="font-size:0.98em;color:#ffd;">Completed: ${job.completed_time}</span></span>
-                        </div>
-                        <div class="completed-job-content" id="${dropdownId}" style="display:${isOpen ? 'block' : 'none'};">
-                            <table class="completed-task-table">
-                                <thead>
-                                    <tr>
-                                        <th>Task Name</th>
-                                        <th>Status</th>
-                                        <th>Render Progress</th>
-                                        <th>Log File</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                ${
-                                    job.tasks.map(function(task) {
-                                        return `<tr>
-                                            <td>${task.task_name}</td>
-                                            <td>${task.status}</td>
-                                            <td>
-                                                ${createProgressBar(task.progress_pct, 160, 14)}
-                                                <span class="progress-label">${task.progress_pct}%</span>
-                                                ${
-                                                    task.tile_info && task.tile_info !== "" ?
-                                                    `<span class="tile-label">${task.tile_info}</span>` : ""
-                                                }
-                                                ${
-                                                    task.step_label && task.step_label !== "" ?
-                                                    `<span class="step-label">${task.step_label}</span>` : ""
-                                                }
-                                                ${
-                                                    task.time_remaining && task.time_remaining !== "" ?
-                                                    `<span class="time-remaining-label">ETA: ${task.time_remaining}</span>` : ""
-                                                }
-                                            </td>
-                                            <td>
-                                                <a class="log-link" href="${task.log_url}" target="_blank">Log File</a>
-                                            </td>
-                                        </tr>`;
-                                    }).join('')
-                                }
-                                </tbody>
-                            </table>
-                        </div>
+                    <div class="completed-job-list-item" onclick="showCompletedJobModal(${idx})">
+                        <span>
+                            <span class="completed-job-list-name">${job.job_name}</span>
+                            <span class="completed-job-list-id">[${job.job_id}]</span>
+                        </span>
+                        <span>
+                            <span class="completed-job-list-status">${job.job_status || ''}</span>
+                            <span class="completed-job-list-time">${job.completed_time ? 'Completed: ' + job.completed_time : ''}</span>
+                        </span>
                     </div>
                 `;
             });
             document.getElementById("completed-jobs-list").innerHTML = html;
         }
-        function toggleCompletedDropdown(dropdownId) {
-            completedDropdownState[dropdownId] = !completedDropdownState[dropdownId];
+
+        function showCompletedJobModal(idx) {
+            var job = lastCompletedJobs[idx];
+            if (!job) return;
+            let modalContent = `
+                <div class="modal-job-header">
+                    <span>${job.job_name}</span>
+                    <span class="modal-job-id">[${job.job_id}]</span>
+                    <span class="modal-job-status">${job.job_status || ''}</span>
+                    <span class="modal-job-time">${job.completed_time ? 'Completed: ' + job.completed_time : ''}</span>
+                </div>
+                <div class="modal-tasks-label">Tasks</div>
+                <table class="completed-task-table">
+                    <thead>
+                        <tr>
+                            <th>Task Name</th>
+                            <th>Status</th>
+                            <th>Render Progress</th>
+                            <th>Log File</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    ${
+                        job.tasks.map(function(task) {
+                            return `<tr>
+                                <td>${task.task_name}</td>
+                                <td>${task.status}</td>
+                                <td>
+                                    ${createProgressBar(task.progress_pct, 160, 14)}
+                                    <span class="progress-label">${task.progress_pct}%</span>
+                                    ${
+                                        task.tile_info && task.tile_info !== "" ?
+                                        `<span class="tile-label">${task.tile_info}</span>` : ""
+                                    }
+                                    ${
+                                        task.step_label && task.step_label !== "" ?
+                                        `<span class="step-label">${task.step_label}</span>` : ""
+                                    }
+                                    ${
+                                        task.time_remaining && task.time_remaining !== "" ?
+                                        `<span class="time-remaining-label">ETA: ${task.time_remaining}</span>` : ""
+                                    }
+                                </td>
+                                <td>
+                                    <a class="log-link" href="${task.log_url}" target="_blank">Log File</a>
+                                </td>
+                            </tr>`;
+                        }).join('')
+                    }
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('completed-job-modal-content').innerHTML = modalContent;
+            document.getElementById('completed-job-modal-overlay').classList.add('active');
+        }
+        window.showCompletedJobModal = showCompletedJobModal;
+
+        function closeCompletedJobModal(event) {
+            document.getElementById('completed-job-modal-overlay').classList.remove('active');
+        }
+        window.closeCompletedJobModal = closeCompletedJobModal;
+
+        // WORKERS PANEL LOGIC
+        function renderWorkers(workers) {
+            let html = '';
+            workers.forEach(function(worker, idx) {
+                let dropdownId = 'worker-dropdown-' + idx;
+                let isOpen = workersDropdownState[dropdownId] || false;
+                html += `<div class="worker-entry">
+                    <div class="worker-header" onclick="toggleWorkerDropdown('${dropdownId}')">
+                        <span class="worker-toggle-arrow" id="worker-arrow-${dropdownId}">${isOpen ? '▼' : '►'}</span>
+                        <span class="worker-name">${worker.name || '(Unnamed)'}</span>
+                        <span class="worker-status ${worker.status.toLowerCase()}">${worker.status}</span>
+                        <span class="worker-version">v${worker.version || '-'}</span>
+                    </div>
+                    <div class="worker-details" id="${dropdownId}" style="display:${isOpen ? 'block' : 'none'};">
+                        <div class="worker-details-row"><b>ID:</b> <span>${worker.id}</span></div>
+                        <div class="worker-details-row"><b>Status:</b> <span>${worker.status}</span></div>
+                        <div class="worker-details-row"><b>Version:</b> <span>${worker.version}</span></div>
+                        <div class="worker-details-row"><b>Can Restart:</b> <span>${worker.can_restart}</span></div>
+                        <div class="worker-details-row"><b>Last Seen:</b> <span>${worker.last_seen}</span></div>
+                    </div>
+                </div>`;
+            });
+            document.getElementById("workers-list").innerHTML = html;
+        }
+        function toggleWorkerDropdown(dropdownId) {
+            workersDropdownState[dropdownId] = !workersDropdownState[dropdownId];
             let el = document.getElementById(dropdownId);
-            let arrow = document.getElementById("arrow-" + dropdownId);
+            let arrow = document.getElementById("worker-arrow-" + dropdownId);
             if (el && arrow) {
-                el.style.display = completedDropdownState[dropdownId] ? 'block' : 'none';
-                arrow.innerHTML = completedDropdownState[dropdownId] ? '−' : '+';
+                el.style.display = workersDropdownState[dropdownId] ? 'block' : 'none';
+                arrow.innerHTML = workersDropdownState[dropdownId] ? '▼' : '►';
             }
         }
-        window.toggleCompletedDropdown = toggleCompletedDropdown;
+        window.toggleWorkerDropdown = toggleWorkerDropdown;
+
         var socket = io();
         socket.on('progress_update', function(data) {
             renderJobs(data.jobs || []);
             renderCompletedJobs(data.completed_jobs || []);
+            renderWorkers(data.workers || []);
             if (data.farm_status) {
                 updateFarmStatusBox(data.farm_status);
             }
