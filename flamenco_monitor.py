@@ -28,6 +28,16 @@ def utc_to_local(dt_utc):
     except Exception:
         return dt_utc
 
+def get_farm_status():
+    try:
+        resp = requests.get(f"{FLAMENCO_API_URL}/status", timeout=3)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get('status', 'unknown')
+    except Exception as e:
+        print(f"Error querying farm status: {e}")
+        return 'unavailable'
+
 def get_jobs(statuses=["active", "queued"]):
     try:
         response = requests.post(
@@ -67,7 +77,6 @@ def parse_time_remaining(line):
 def extract_render_step_and_tile(lines):
     tile_info = ""
     step_label = ""
-    # Patterns for common steps (as before)
     step_patterns = [
         (r"\|\s*Scene, View Layer \|\s*Synchronizing object \|\s*(.+)$", "Synchronizing object"),
         (r"\|\s*Scene, View Layer \|\s*Synchronizing object$", "Synchronizing object"),
@@ -290,17 +299,21 @@ def collect_job_data():
 
 @app.route("/")
 def index():
-    return render_template_string(TEMPLATE)
+    farm_status = get_farm_status()
+    return render_template_string(TEMPLATE, flamenco_server=FLAMENCO_SERVER, farm_status=farm_status)
 
 def background_thread():
     while True:
         data = collect_job_data()
+        data['farm_status'] = get_farm_status()
         socketio.emit("progress_update", data)
         socketio.sleep(1)
 
 @socketio.on('connect')
 def on_connect():
-    emit("progress_update", collect_job_data())
+    data = collect_job_data()
+    data['farm_status'] = get_farm_status()
+    emit("progress_update", data)
 
 TEMPLATE = """
 <!DOCTYPE html>
@@ -316,6 +329,21 @@ TEMPLATE = """
             font-family: Segoe UI, Arial, sans-serif;
             margin: 0; padding: 0;
         }
+        .status-bar {
+            width: 410px;
+            margin: 26px auto 0 auto;
+            text-align: center;
+            font-size: 1.18em;
+            border-radius: 12px;
+            box-shadow: 0 3px 14px #0006;
+            background: #18191a;
+            padding: 14px 0 11px 0;
+            letter-spacing: 0.04em;
+        }
+        .status-red { color: #ff2b2b; font-weight: bold; }
+        .status-yellow { color: #ffdb37; font-weight: bold; }
+        .status-green { color: #7bf178; font-weight: bold; }
+        .status-orange { color: #ff9800; font-weight: bold; }
         .container {
             max-width: 1100px;
             margin: 40px auto;
@@ -344,19 +372,15 @@ TEMPLATE = """
         }
         .progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, #44b0ff, #24ffb5 90%);
-            border-radius: 10px;
-            transition: width 0.2s;
+            background: linear-gradient(90deg, #27e2f3, #1db385 82%, #58f7b5);
+            border-radius: 8px;
+            transition: width 0.7s cubic-bezier(.44,.15,.28,1.11);
         }
         .progress-label {
-            font-size: 1.2em;
-            color: #fff;
-            vertical-align: middle;
-        }
-        .step-label {
-            font-size: 0.98em;
-            color: #ffd700;
-            margin-left: 10px;
+            font-size: 1.08em;
+            font-family: monospace;
+            color: #afffd3;
+            margin-left: 12px;
             vertical-align: middle;
         }
         .tile-label {
@@ -390,7 +414,6 @@ TEMPLATE = """
         }
         .task-table tr:last-child td { border-bottom: none; }
         .log-link { color: #53e7fc; text-decoration: underline; }
-        /* Dropdowns */
         .completed-job-header {
             background: #1b1e2b;
             border-radius: 7px 7px 0 0;
@@ -418,6 +441,7 @@ TEMPLATE = """
     </style>
 </head>
 <body>
+    <div id="farm-status" class="status-bar"></div>
     <div class="container">
         <h2>Flamenco Jobs & Task Progress <span id="updating" style="font-size:0.7em; color:#6f8;">(Live)</span></h2>
         <div id="jobs-list"></div>
@@ -426,9 +450,31 @@ TEMPLATE = """
         <div id="completed-jobs-list"></div>
     </div>
     <script>
+        function updateFarmStatusBox(farmStatus) {
+            let colorClass = "status-yellow";
+            let label = farmStatus.charAt(0).toUpperCase() + farmStatus.slice(1);
+            if (farmStatus.toLowerCase() === "inoperative") {
+                colorClass = "status-red";
+            } else if (farmStatus.toLowerCase() === "idle") {
+                colorClass = "status-yellow";
+            } else if (farmStatus.toLowerCase() === "active") {
+                colorClass = "status-green";
+            } else if (farmStatus.toLowerCase() === "waiting") {
+                colorClass = "status-orange";
+            } else if (farmStatus.toLowerCase() === "unavailable") {
+                colorClass = "status-red";
+                label = "Unavailable";
+            }
+            document.getElementById("farm-status").innerHTML =
+              `Farm Status: <span class="${colorClass}">${label}</span>`;
+        }
+        // Initial status from server
+        updateFarmStatusBox("{{ farm_status }}");
+
         var taskSortingState = {};
         var completedDropdownState = {};
         var lastJobsData = [];
+
         function createProgressBar(pct, width=200, height=16) {
             return `<div class="progress-bar-bg" style="width:${width}px;height:${height}px;">
                 <div class="progress-bar" style="width:${pct}%;"></div>
@@ -600,6 +646,9 @@ TEMPLATE = """
         socket.on('progress_update', function(data) {
             renderJobs(data.jobs || []);
             renderCompletedJobs(data.completed_jobs || []);
+            if (data.farm_status) {
+                updateFarmStatusBox(data.farm_status);
+            }
         });
     </script>
 </body>
