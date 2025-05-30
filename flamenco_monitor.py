@@ -767,7 +767,7 @@ TEMPLATE = """
                         }
                         ${
                             task.time_remaining && task.time_remaining !== "" ?
-                            `<span class="time-remaining-label">ETA: ${task.time_remaining}</span>` : ""
+                            `<span class="time-remaining-label">ETA:${task.time_remaining}</span>` : ""
                         }
                     </td>
                     <td>
@@ -887,7 +887,7 @@ TEMPLATE = """
                                     }
                                     ${
                                         task.time_remaining && task.time_remaining !== "" ?
-                                        `<span class="time-remaining-label">ETA: ${task.time_remaining}</span>` : ""
+                                        `<span class="time-remaining-label">ETA:${task.time_remaining}</span>` : ""
                                     }
                                 </td>
                                 <td>
