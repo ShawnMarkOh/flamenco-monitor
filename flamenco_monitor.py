@@ -87,6 +87,9 @@ def parse_time_remaining(line):
 def extract_render_step_and_tile(lines):
     tile_info = ""
     step_label = ""
+    latest_tile = None
+    latest_total = None
+    # Patterns as before
     step_patterns = [
         (r"\|\s*Scene, View Layer \|\s*Synchronizing object \|\s*(.+)$", "Synchronizing object"),
         (r"\|\s*Scene, View Layer \|\s*Synchronizing object$", "Synchronizing object"),
@@ -132,15 +135,20 @@ def extract_render_step_and_tile(lines):
         (r"\|\s*Scene \|\s*Reading full buffer from disk", "Reading full buffer from disk"),
         (r"\|\s*Scene, View Layer \|\s*Finished$", "Finished"),
     ]
+    # Always grab latest values in a single pass
     for line in reversed(lines):
+        # Look for most recent tile render progress
         m = re.search(r"Rendered\s+(\d+)\s*/\s*(\d+)\s+Tiles", line)
-        if m:
-            tile_info = f"Rendering tile {m.group(1)} of {m.group(2)}"
+        if m and latest_tile is None:
+            latest_tile = int(m.group(1))
+            latest_total = int(m.group(2))
+        # Always update step_label to the most recent matched step
         for pat, label in step_patterns:
             if re.search(pat, line):
-                step_label = label
-        if tile_info and step_label:
-            break
+                if not step_label:
+                    step_label = label
+    if latest_tile is not None and latest_total is not None:
+        tile_info = f"Rendering tile {latest_tile} of {latest_total}"
     return step_label, tile_info
 
 def fetch_render_progress_and_step(log_url):
@@ -153,20 +161,26 @@ def fetch_render_progress_and_step(log_url):
         last_update = datetime.now(SERVER_TZ).strftime('%Y-%m-%d %H:%M:%S')
         step_label, tile_info = extract_render_step_and_tile(lines)
         time_remaining = ""
+        # Use the *latest* progress numbers from the log
+        latest_cur, latest_total = 0, 0
         for line in reversed(lines):
             m = pat.search(line)
             if m:
-                cur, total = int(m.group(1)), int(m.group(2))
-                pct = int(cur / total * 100) if total else 0
-                for lookback in range(0, 10):
-                    idx = lines.index(line) - lookback
-                    if idx < 0:
-                        break
-                    tr = parse_time_remaining(lines[idx])
-                    if tr:
-                        time_remaining = tr
-                        break
-                return cur, total, pct, f"{cur} / {total}", last_update, step_label, tile_info, time_remaining
+                latest_cur, latest_total = int(m.group(1)), int(m.group(2))
+                break
+        pct = int(latest_cur / latest_total * 100) if latest_total else 0
+        for lookback in range(0, 10):
+            idx = len(lines) - lookback - 1
+            if idx < 0:
+                break
+            tr = parse_time_remaining(lines[idx])
+            if tr:
+                time_remaining = tr
+                break
+        if latest_total:
+            return latest_cur, latest_total, pct, f"{latest_cur} / {latest_total}", last_update, step_label, tile_info, time_remaining
+        # If no progress, check for "Building BVH"
+        for line in reversed(lines):
             m2 = re.search(r"Building BVH\s+(\d+)%", line)
             if m2:
                 pct = int(m2.group(1))
@@ -180,6 +194,7 @@ def fetch_render_progress_and_step(log_url):
     except Exception as e:
         print(f"Error fetching log {log_url}:", e)
         return 0, 0, 0, "Log error", None, "", "", ""
+
 
 def parse_iso8601(dtstr):
     if dtstr:
